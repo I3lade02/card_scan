@@ -142,3 +142,14 @@ function toCardFull(c: any): ScryfallCardFull {
     finishes: c.finishes,
   };
 }
+
+export async function getCardByFuzzyName(name: string): Promise<ScryfallCardFull> {
+  const q = encodeURIComponent(name.trim());
+  const url = `${SCRYFALL}/cards/named?fuzzy=${q}`;
+
+  const res = await fetch(url, { headers: HEADERS });
+  await ensureOk(res);
+
+  const c = await res.json();
+  return toCardFull(c);
+}
