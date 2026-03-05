@@ -10,12 +10,32 @@ export type ScryfallCardLite = {
     usd?: string | null;
     usd_foil?: string | null;
   };
+
+  image_uris?: {
+    small?: string;
+    normal?: string;
+    large?: string;
+  };
+  card_faces?: Array<{
+    image_uris?: {
+      small?: string;
+      normal?: string;
+      large?: string;
+    };
+  }>;
+
+  // ✅ nové: hezké popisky setu
+  set_name?: string;
+  released_at?: string;
 };
 
 export type ScryfallCardFull = ScryfallCardLite & {
   type_line?: string;
   oracle_text?: string;
   rarity?: string;
+
+  // ✅ nové: link na všechny printy
+  prints_search_uri?: string;
 };
 
 export type CollectionItem = {
@@ -34,7 +54,8 @@ export type CollectionItem = {
     usd_foil?: string | null;
   };
 
-  imageUri?: string;
+  imageSmall?: string | null;
+
   addedAt: string;
   updatedAt: string;
 };

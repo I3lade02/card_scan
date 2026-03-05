@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { CollectionMap, CollectionItem, ScryfallCardLite } from "@/src/types/mtg";
+import { pickCardImage } from "@/src/lib/scryfall";
 
 const KEY = "mtg_collection_v1";
 
@@ -21,16 +22,23 @@ export async function upsertToCollection(card: any, qtyToAdd: number): Promise<v
   const map = await loadCollection();
   const now = new Date().toISOString();
 
+  const imageSmall = pickCardImage(card, "small");
+
   const existing = map[card.id];
   if (existing) {
     existing.qty += qtyToAdd;
     existing.updatedAt = now;
+
     existing.prices = {
       eur: card.prices?.eur ?? existing.prices.eur ?? null,
       eur_foil: card.prices?.eur_foil ?? existing.prices.eur_foil ?? null,
       usd: card.prices?.usd ?? existing.prices.usd ?? null,
       usd_foil: card.prices?.usd_foil ?? existing.prices.usd_foil ?? null,
     };
+
+    // ✅ doplň/aktualizuj thumbnail
+    existing.imageSmall = imageSmall ?? existing.imageSmall ?? null;
+
     map[card.id] = existing;
   } else {
     const item: CollectionItem = {
@@ -39,16 +47,23 @@ export async function upsertToCollection(card: any, qtyToAdd: number): Promise<v
       set: card.set,
       collectorNumber: card.collector_number,
       lang: card.lang,
+
       qty: qtyToAdd,
+
       prices: {
         eur: card.prices?.eur ?? null,
         eur_foil: card.prices?.eur_foil ?? null,
         usd: card.prices?.usd ?? null,
         usd_foil: card.prices?.usd_foil ?? null,
       },
+
+      // ✅ nové
+      imageSmall: imageSmall ?? null,
+
       addedAt: now,
       updatedAt: now,
     };
+
     map[card.id] = item;
   }
 
@@ -75,7 +90,6 @@ export async function deleteFromCollection(scryfallId: string): Promise<void> {
   await saveCollection(map);
 }
 
-// Aplikuje nové ceny do mapy
 export async function applyPriceRefresh(cards: ScryfallCardLite[]): Promise<void> {
   const map = await loadCollection();
   const now = new Date().toISOString();
@@ -90,6 +104,10 @@ export async function applyPriceRefresh(cards: ScryfallCardLite[]): Promise<void
       usd: c.prices?.usd ?? it.prices.usd ?? null,
       usd_foil: c.prices?.usd_foil ?? it.prices.usd_foil ?? null,
     };
+
+    const imageSmall = (c.image_uris?.small ?? c.card_faces?.[0]?.image_uris?.small) ?? null;
+    it.imageSmall = imageSmall ?? it.imageSmall ?? null;
+
     it.updatedAt = now;
     map[c.id] = it;
   }
