@@ -1,21 +1,33 @@
+export type Finish = "nonfoil" | "foil" | "etched";
+
+export type ScryfallPrices = {
+  eur?: string | null;
+  eur_foil?: string | null;
+  eur_etched?: string | null;
+  usd?: string | null;
+  usd_foil?: string | null;
+  usd_etched?: string | null;
+};
+
 export type ScryfallCardLite = {
   id: string;
   name: string;
   set: string;
+
+  set_name?: string;
+  released_at?: string;
+
   collector_number?: string;
   lang?: string;
-  prices?: {
-    eur?: string | null;
-    eur_foil?: string | null;
-    usd?: string | null;
-    usd_foil?: string | null;
-  };
+
+  prices?: ScryfallPrices;
 
   image_uris?: {
     small?: string;
     normal?: string;
     large?: string;
   };
+
   card_faces?: Array<{
     image_uris?: {
       small?: string;
@@ -23,10 +35,6 @@ export type ScryfallCardLite = {
       large?: string;
     };
   }>;
-
-  // ✅ nové: hezké popisky setu
-  set_name?: string;
-  released_at?: string;
 };
 
 export type ScryfallCardFull = ScryfallCardLite & {
@@ -34,25 +42,25 @@ export type ScryfallCardFull = ScryfallCardLite & {
   oracle_text?: string;
   rarity?: string;
 
-  // ✅ nové: link na všechny printy
   prints_search_uri?: string;
+
+  finishes?: Finish[];
 };
 
 export type CollectionItem = {
   scryfallId: string;
   name: string;
+
   set: string;
+  set_name?: string;
+
   collectorNumber?: string;
   lang?: string;
 
   qty: number;
+  finish: Finish;
 
-  prices: {
-    eur?: string | null;
-    eur_foil?: string | null;
-    usd?: string | null;
-    usd_foil?: string | null;
-  };
+  prices: ScryfallPrices;
 
   imageSmall?: string | null;
 

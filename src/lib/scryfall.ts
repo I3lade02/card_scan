@@ -14,7 +14,9 @@ async function ensureOk(res: Response) {
   try {
     const j = await res.json();
     if (j?.details) msg = `Scryfall ${res.status}: ${j.details}`;
+    else if (j?.message) msg = `Scryfall ${res.status}: ${j.message}`;
   } catch {}
+
   throw new Error(msg);
 }
 
@@ -68,14 +70,39 @@ export async function getCardById(id: string): Promise<ScryfallCardFull> {
   return toCardFull(c);
 }
 
+// Prints (bez limitu, s paginací)
+export async function getPrintsForCard(printsSearchUri: string): Promise<ScryfallCardLite[]> {
+  const out: ScryfallCardLite[] = [];
+  let url: string | null = printsSearchUri;
+
+  while (url) {
+    const res = await fetch(url, { headers: HEADERS });
+    await ensureOk(res);
+
+    const json: any = await res.json();
+    const data: any[] = Array.isArray(json?.data) ? json.data : [];
+    out.push(...data.map(toCardLite));
+
+    url = json?.has_more ? (json?.next_page ?? null) : null;
+  }
+
+  return out;
+}
+
+// Bulk endpoint: POST /cards/collection (max 75 identifiers per call)
 export async function getCardsByIdsBulk(ids: string[]): Promise<ScryfallCardLite[]> {
   const url = `${SCRYFALL}/cards/collection`;
 
-  const body = { identifiers: ids.map((id) => ({ id })) };
+  const body = {
+    identifiers: ids.map((id) => ({ id })),
+  };
 
   const res = await fetch(url, {
     method: "POST",
-    headers: { ...HEADERS, "Content-Type": "application/json" },
+    headers: {
+      ...HEADERS,
+      "Content-Type": "application/json",
+    },
     body: JSON.stringify(body),
   });
 
@@ -91,11 +118,15 @@ function toCardLite(c: any): ScryfallCardLite {
     id: c.id,
     name: c.name,
     set: c.set,
+
     set_name: c.set_name,
     released_at: c.released_at,
+
     collector_number: c.collector_number,
     lang: c.lang,
+
     prices: c.prices,
+
     image_uris: c.image_uris,
     card_faces: c.card_faces,
   };
@@ -108,24 +139,6 @@ function toCardFull(c: any): ScryfallCardFull {
     oracle_text: c.oracle_text,
     rarity: c.rarity,
     prints_search_uri: c.prints_search_uri,
+    finishes: c.finishes,
   };
-}
-
-export async function getPrintsForCard(printsSearchUri: string): Promise<ScryfallCardLite[]> {
-    const out: ScryfallCardLite[] = [];
-
-    let url: string | null = printsSearchUri;
-
-    while (url) {
-        const res = await fetch(url, { headers: HEADERS });
-        await ensureOk(res);
-
-        const json: any = await res.json();
-        const data: any[] = Array.isArray(json?.data) ? json.data : [];
-        out.push(...data.map(toCardLite));
-
-        url = json?.has_more ? (json?.next_page ?? null) : null;
-    }
-
-    return out;
 }
