@@ -1,57 +1,65 @@
-import { ocrLinesFromImage } from "@/src/lib/ocr";
-import { cropTitleBar } from "@/src/lib/titleCrop";
-import { getCardByFuzzyName } from "@/src/lib/scryfall";
+import { ocrFromImage } from "@/src/lib/ocr";
+import { cropByOverlay, type OverlayRect01 } from "@/src/lib/titleCrop";
+import { getCardByFuzzyName, searchCards } from "@/src/lib/scryfall";
 
-/**
- * Z OCR výsledků vytáhne nejlepší kandidát na název karty.
- * Heuristika: upřednostnit řádky s nejvíc písmeny, zahodit krátké/šum.
- */
-export function pickBestNameCandidate(lines: string[]): string | null {
-  const cleaned = lines
-    .map((l) => l.replace(/\s+/g, " ").trim())
-    .filter(Boolean)
-    // hodně OCR šumu jsou samé znaky, tak chceme dost písmen
-    .map((l) => ({
-      raw: l,
-      letters: (l.match(/[A-Za-z]/g) ?? []).length,
-    }))
-    .filter((x) => x.letters >= 5)
-    .sort((a, b) => b.letters - a.letters);
-
-  if (cleaned.length === 0) return null;
-
-  // odstraň hodně divné znaky, nech základní interpunkci pro názvy
-  const best = cleaned[0].raw.replace(/[^A-Za-z0-9'’:\-., ]+/g, "").trim();
-  return best.length >= 3 ? best : null;
+function normalizeLine(line: string) {
+    return line
+        .replace(/\s+/g, " ")
+        .replace(/[^A-Za-z0-9'’:\-., ]+/g, "")
+        .trim();
 }
 
-/**
- * Scan v1: foto -> crop title baru -> OCR -> Scryfall fuzzy -> vrátí {id, guessedName}
- */
-export async function scanCardFromPhoto(photoUri: string): Promise<{
-  scryfallId: string;
-  guessedName: string;
-  ocrLines: string[];
-  croppedUri: string;
+export function pickBestNameCandidate(lines: string[]): string | null {
+    const scored = lines
+        .map((l) => normalizeLine(l))
+        .filter(Boolean)
+        .map((l) => {
+            const letters = (l.match(/[A-Za-z]/g) ?? []).length;
+            return { l, letters, len: l.length };
+        })
+        .filter((x) => x.letters >= 6)
+        .sort((a, b) => {
+            if (b.letters !== a.letters) return b.letters - a.letters;
+            return a.len - b.len;
+        });
+
+    if (!scored.length) return null;
+    return scored[0].l.length >= 3 ? scored[0].l : null;
+}
+
+export async function scanCardFromPhoto(
+    photoUri: string,
+    overlay01: OverlayRect01
+): Promise<{
+    scryfallId: string;
+    guessedName: string;
+    ocrLines: string[];
+    croppedUri: string;
 }> {
-  // 1) cropneme jen horní část (title bar) -> lepší OCR + rychlejší
-  const croppedUri = await cropTitleBar(photoUri);
+    const croppedUri = await cropByOverlay(photoUri, overlay01);
 
-  // 2) OCR
-  const ocrLines = await ocrLinesFromImage(croppedUri);
-  const guessedName = pickBestNameCandidate(ocrLines) ?? "";
+    const ocr = await ocrFromImage(croppedUri);
+    const ocrLines = ocr.lines;
 
-  if (!guessedName) {
-    throw new Error("OCR nic rozumného nenašlo. Zkus lepší světlo / ostrost, nebo použij ruční hledání.");
-  }
+    const guessedName = pickBestNameCandidate(ocrLines) ?? "";
 
-  // 3) Scryfall fuzzy lookup
-  const card = await getCardByFuzzyName(guessedName);
+    if (!guessedName) {
+        throw new Error(
+            "OCR nic rozumného nenašlo"
+        );
+    }
 
-  return {
-    scryfallId: card.id,
-    guessedName,
-    ocrLines,
-    croppedUri,
-  };
+    try {
+        const card = await getCardByFuzzyName(guessedName);
+        return { scryfallId: card.id, guessedName, ocrLines, croppedUri };
+    } catch (e: any) {
+        const msg = String(e?.message ?? "");
+        if (msg.includes("404")) {
+            const results = await searchCards(guessedName);
+            if (results.length > 0) {
+                return {scryfallId: results[0].id, guessedName, ocrLines, croppedUri };
+            }
+        }
+        throw e;
+    }
 }

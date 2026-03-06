@@ -16,6 +16,7 @@ import { useDebouncedValue } from "@/src/lib/debounce";
 import { autocompleteNames, searchCards, pickCardImage } from "@/src/lib/scryfall";
 import type { ScryfallCardLite } from "@/src/types/mtg";
 import { scanCardFromPhoto } from "@/src/lib/scanPipeline";
+import type { OverlayRect01 } from "@/src/lib/titleCrop";
 
 type Mode = "search" | "scan";
 
@@ -24,7 +25,7 @@ export default function ScanScreen() {
 
   const [mode, setMode] = useState<Mode>("scan");
 
-  // ---- Search-as-you-type ----
+  // Search-as-you-type
   const [query, setQuery] = useState("");
   const debounced = useDebouncedValue(query, 250);
 
@@ -32,7 +33,6 @@ export default function ScanScreen() {
   const [results, setResults] = useState<ScryfallCardLite[]>([]);
   const [loadingSearch, setLoadingSearch] = useState(false);
 
-  // X tlačítko
   const showX = query.length > 0;
 
   useEffect(() => {
@@ -50,18 +50,15 @@ export default function ScanScreen() {
       try {
         setLoadingSearch(true);
 
-        // 1) autocomplete
         const names = await autocompleteNames(q, { signal: ctrl.signal });
         if (!alive) return;
         setSuggestions(names);
 
-        // 2) výsledky
         const cards = await searchCards(q, { signal: ctrl.signal });
         if (!alive) return;
         setResults(cards);
-      } catch (e: any) {
-        if (!alive) return;
-        // ignore abort
+      } catch {
+        // ignore abort / transient errors
       } finally {
         if (alive) setLoadingSearch(false);
       }
@@ -73,19 +70,20 @@ export default function ScanScreen() {
     };
   }, [debounced]);
 
-  // ---- Camera scan v1 ----
+  // Camera scan
   const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
 
   const [scanning, setScanning] = useState(false);
   const [lastThumb, setLastThumb] = useState<string | null>(null);
+  const [previewSize, setPreviewSize] = useState<{ w: number; h: number } | null>(null);
 
   async function ensurePerms() {
     if (!permission) return;
     if (!permission.granted) {
       const res = await requestPermission();
       if (!res.granted) {
-        Alert.alert("Povolení", "Bez povolení kamery to nepůjde.");
+        Alert.alert("Permission", "Camera permission is required.");
       }
     }
   }
@@ -95,6 +93,34 @@ export default function ScanScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [permission?.granted]);
 
+  // These values MUST exactly match the visible overlay below
+  const overlayBox = useMemo(() => {
+    const left = 16;
+    const right = 16;
+    const top = 15;
+    const height = 70;
+
+    if (!previewSize) return null;
+
+    return {
+      x: left,
+      y: top,
+      w: previewSize.w - left - right,
+      h: height,
+    };
+  }, [previewSize]);
+
+  const overlay01: OverlayRect01 | null = useMemo(() => {
+    if (!previewSize || !overlayBox) return null;
+
+    return {
+      x: overlayBox.x / previewSize.w,
+      y: overlayBox.y / previewSize.h,
+      w: overlayBox.w / previewSize.w,
+      h: overlayBox.h / previewSize.h,
+    };
+  }, [previewSize, overlayBox]);
+
   async function takeAndScan() {
     try {
       if (!permission?.granted) {
@@ -103,7 +129,12 @@ export default function ScanScreen() {
       }
 
       if (!cameraRef.current) {
-        Alert.alert("Kamera", "Kamera není připravená.");
+        Alert.alert("Camera", "Camera is not ready.");
+        return;
+      }
+
+      if (!overlay01) {
+        Alert.alert("Scan", "Overlay is not ready yet. Try again.");
         return;
       }
 
@@ -115,17 +146,16 @@ export default function ScanScreen() {
       });
 
       if (!photo?.uri) {
-        throw new Error("Nepodařilo se vyfotit.");
+        throw new Error("Failed to capture photo.");
       }
 
       setLastThumb(photo.uri);
 
-      const res = await scanCardFromPhoto(photo.uri);
+      const res = await scanCardFromPhoto(photo.uri, overlay01);
 
-      // úspěch -> detail
       router.push(`/card/${res.scryfallId}`);
     } catch (e: any) {
-      Alert.alert("Scan selhal", e?.message ?? "Něco se pokazilo.");
+      Alert.alert("Scan failed", e?.message ?? "Something went wrong.");
     } finally {
       setScanning(false);
     }
@@ -155,7 +185,7 @@ export default function ScanScreen() {
 
   return (
     <View style={{ flex: 1, padding: 16, gap: 12 }}>
-      <Text style={{ fontSize: 22, fontWeight: "700" }}>Přidat kartu</Text>
+      <Text style={{ fontSize: 22, fontWeight: "700" }}>Add card</Text>
       {tabs}
 
       {mode === "scan" ? (
@@ -163,26 +193,42 @@ export default function ScanScreen() {
           {!permission?.granted ? (
             <Pressable
               onPress={ensurePerms}
-              style={{ padding: 12, backgroundColor: "#111", borderRadius: 12, alignItems: "center" }}
+              style={{
+                padding: 12,
+                backgroundColor: "#111",
+                borderRadius: 12,
+                alignItems: "center",
+              }}
             >
-              <Text style={{ color: "white", fontWeight: "800" }}>Povolit kameru</Text>
+              <Text style={{ color: "white", fontWeight: "800" }}>Allow camera</Text>
             </Pressable>
           ) : (
             <>
-              <View style={{ borderRadius: 16, overflow: "hidden", borderWidth: 1, borderColor: "#e5e5e5" }}>
+              <View
+                style={{
+                  borderRadius: 16,
+                  overflow: "hidden",
+                  borderWidth: 1,
+                  borderColor: "#e5e5e5",
+                }}
+                onLayout={(e) => {
+                  const { width, height } = e.nativeEvent.layout;
+                  setPreviewSize({ w: width, h: height });
+                }}
+              >
                 <CameraView
                   ref={cameraRef}
                   style={{ width: "100%", height: 380 }}
                   facing="back"
                 />
-                {/* jednoduchý overlay “title bar” */}
+
                 <View
                   pointerEvents="none"
                   style={{
                     position: "absolute",
                     left: 16,
                     right: 16,
-                    top: 20,
+                    top: 15,
                     height: 70,
                     borderWidth: 2,
                     borderColor: "rgba(255,255,255,0.85)",
@@ -190,12 +236,19 @@ export default function ScanScreen() {
                     backgroundColor: "rgba(0,0,0,0.12)",
                   }}
                 />
+
                 <View
                   pointerEvents="none"
-                  style={{ position: "absolute", left: 0, right: 0, top: 0, padding: 12 }}
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    right: 0,
+                    top: 0,
+                    padding: 12,
+                  }}
                 >
                   <Text style={{ color: "white", fontWeight: "800" }}>
-                    Zaměř horní část (název) do rámečku
+                    Align the card title inside the frame
                   </Text>
                 </View>
               </View>
@@ -211,7 +264,7 @@ export default function ScanScreen() {
                 }}
               >
                 <Text style={{ color: "white", fontWeight: "800" }}>
-                  {scanning ? "Skenuju…" : "Vyfotit a rozpoznat"}
+                  {scanning ? "Scanning..." : "Capture and recognize"}
                 </Text>
               </Pressable>
 
@@ -221,15 +274,20 @@ export default function ScanScreen() {
                 <View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}>
                   <Image
                     source={{ uri: lastThumb }}
-                    style={{ width: 54, height: 54, borderRadius: 10, backgroundColor: "#f2f2f2" }}
+                    style={{
+                      width: 54,
+                      height: 54,
+                      borderRadius: 10,
+                      backgroundColor: "#f2f2f2",
+                    }}
                   />
                   <Text style={{ opacity: 0.7, flex: 1 }}>
-                    Tip: lepší světlo + klidná ruka = o dost vyšší úspěšnost.
+                    Better light and a steady hand improve OCR a lot.
                   </Text>
                 </View>
               ) : (
                 <Text style={{ opacity: 0.7 }}>
-                  Scan v1 je OCR názvu. Když to ujede, přepni na Search.
+                  Scan v1 uses OCR on the card title. If it misses, use Search mode.
                 </Text>
               )}
             </>
@@ -237,7 +295,6 @@ export default function ScanScreen() {
         </View>
       ) : (
         <View style={{ flex: 1, gap: 12 }}>
-          {/* Search input + X */}
           <View
             style={{
               flexDirection: "row",
@@ -251,14 +308,17 @@ export default function ScanScreen() {
             <TextInput
               value={query}
               onChangeText={setQuery}
-              placeholder="Např. Sol Ring"
+              placeholder="e.g. Sol Ring"
               autoCapitalize="words"
               autoCorrect={false}
               autoComplete="off"
               style={{ flex: 1, paddingVertical: 10 }}
             />
             {showX && (
-              <Pressable onPress={() => setQuery("")} style={{ paddingHorizontal: 6, paddingVertical: 4 }}>
+              <Pressable
+                onPress={() => setQuery("")}
+                style={{ paddingHorizontal: 6, paddingVertical: 4 }}
+              >
                 <Text style={{ fontSize: 18, opacity: 0.6, fontWeight: "700" }}>✕</Text>
               </Pressable>
             )}
@@ -268,7 +328,7 @@ export default function ScanScreen() {
 
           {suggestions.length > 0 && (
             <View style={{ gap: 6 }}>
-              <Text style={{ fontWeight: "800" }}>Návrhy</Text>
+              <Text style={{ fontWeight: "800" }}>Suggestions</Text>
               <FlatList
                 data={suggestions}
                 keyExtractor={(s, idx) => `${s}-${idx}`}
@@ -295,7 +355,7 @@ export default function ScanScreen() {
           )}
 
           <View style={{ flex: 1 }}>
-            <Text style={{ fontWeight: "800", marginBottom: 8 }}>Výsledky</Text>
+            <Text style={{ fontWeight: "800", marginBottom: 8 }}>Results</Text>
             <FlatList
               data={results}
               keyExtractor={(c) => c.id}
@@ -318,11 +378,23 @@ export default function ScanScreen() {
                     {thumb ? (
                       <Image
                         source={{ uri: thumb }}
-                        style={{ width: 56, height: 78, borderRadius: 10, backgroundColor: "#f2f2f2" }}
+                        style={{
+                          width: 56,
+                          height: 78,
+                          borderRadius: 10,
+                          backgroundColor: "#f2f2f2",
+                        }}
                         resizeMode="cover"
                       />
                     ) : (
-                      <View style={{ width: 56, height: 78, borderRadius: 10, backgroundColor: "#f2f2f2" }} />
+                      <View
+                        style={{
+                          width: 56,
+                          height: 78,
+                          borderRadius: 10,
+                          backgroundColor: "#f2f2f2",
+                        }}
+                      />
                     )}
 
                     <View style={{ flex: 1, gap: 4 }}>
@@ -330,7 +402,8 @@ export default function ScanScreen() {
                         {item.name}
                       </Text>
                       <Text style={{ opacity: 0.7 }} numberOfLines={1}>
-                        {item.set.toUpperCase()} {item.collector_number ? `• #${item.collector_number}` : ""}
+                        {item.set.toUpperCase()}{" "}
+                        {item.collector_number ? `• #${item.collector_number}` : ""}
                       </Text>
                       <Text style={{ opacity: 0.85 }}>EUR: {item.prices?.eur ?? "—"}</Text>
                     </View>
@@ -339,9 +412,9 @@ export default function ScanScreen() {
               }}
               ListEmptyComponent={
                 debounced.trim() ? (
-                  <Text style={{ opacity: 0.7 }}>Nic nenalezeno.</Text>
+                  <Text style={{ opacity: 0.7 }}>No results found.</Text>
                 ) : (
-                  <Text style={{ opacity: 0.7 }}>Začni psát název karty.</Text>
+                  <Text style={{ opacity: 0.7 }}>Start typing a card name.</Text>
                 )
               }
             />
